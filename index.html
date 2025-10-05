@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Lecteur Audio 8 Canaux</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        div { margin: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Lecteur de Fichier Audio 8 Canaux</h1>
+    
+    <select id="songSelect">
+        <option value="https://example.com/audio1.wav">Morceau 1</option>
+        <option value="https://example.com/audio2.wav">Morceau 2</option>
+        <option value="https://example.com/audio3.wav">Morceau 3</option>
+        <!-- Ajoutez d'autres liens ici -->
+    </select>
+    
+    <button id="playBtn">Jouer</button>
+    
+    <div>
+        <label>Vitesse de lecture (0.5 à 2.0)</label>
+        <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1">
+    </div>
+    
+    <div>
+        <label>Volume pistes 1 et 2</label>
+        <input type="range" id="vol1" min="0" max="1" step="0.01" value="1">
+    </div>
+    <div>
+        <label>Volume pistes 3 et 4</label>
+        <input type="range" id="vol2" min="0" max="1" step="0.01" value="1">
+    </div>
+    <div>
+        <label>Volume pistes 5 et 6</label>
+        <input type="range" id="vol3" min="0" max="1" step="0.01" value="1">
+    </div>
+    <div>
+        <label>Volume pistes 7 et 8</label>
+        <input type="range" id="vol4" min="0" max="1" step="0.01" value="1">
+    </div>
+
+    <script type="module">
+        import { createRubberBandRealtimeNode } from 'https://cdn.jsdelivr.net/npm/rubberband-web/dist/index.js';
+
+        const audioCtx = new AudioContext();
+        let source;
+        let rubberBandNode;
+        let splitter;
+        let gains = [];
+        let merger;
+
+        async function initAudioGraph() {
+            const processorUrl = 'https://cdn.jsdelivr.net/npm/rubberband-web/public/rubberband-processor.js';
+            rubberBandNode = await createRubberBandRealtimeNode(audioCtx, processorUrl);
+            rubberBandNode.setPitch(1.0);
+            rubberBandNode.setTempo(1.0); // Vitesse initiale 1.0
+
+            splitter = audioCtx.createChannelSplitter(8);
+            merger = audioCtx.createChannelMerger(8);
+
+            for (let i = 0; i < 8; i++) {
+                gains[i] = audioCtx.createGain();
+                splitter.connect(gains[i], i);
+                gains[i].connect(merger, 0, i);
+            }
+
+            rubberBandNode.connect(splitter);
+            merger.connect(audioCtx.destination);
+        }
+
+        await initAudioGraph();
+
+        const volSliders = [
+            document.getElementById('vol1'),
+            document.getElementById('vol2'),
+            document.getElementById('vol3'),
+            document.getElementById('vol4')
+        ];
+
+        volSliders.forEach((slider, idx) => {
+            slider.addEventListener('input', () => {
+                const val = parseFloat(slider.value);
+                gains[2 * idx].gain.value = val;
+                gains[2 * idx + 1].gain.value = val;
+            });
+        });
+
+        const speedSlider = document.getElementById('speed');
+        speedSlider.addEventListener('input', () => {
+            const speed = parseFloat(speedSlider.value);
+            rubberBandNode.setTempo(1 / speed);
+        });
+
+        const playBtn = document.getElementById('playBtn');
+        playBtn.addEventListener('click', async () => {
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            const select = document.getElementById('songSelect');
+            const url = select.value;
+
+            if (source) {
+                source.stop();
+                source.disconnect();
+            }
+
+            try {
+                const resp = await fetch(url);
+                const buf = await resp.arrayBuffer();
+                const decoded = await audioCtx.decodeAudioData(buf);
+
+                if (decoded.numberOfChannels !== 8) {
+                    alert('Le fichier audio doit avoir exactement 8 canaux.');
+                    return;
+                }
+
+                source = audioCtx.createBufferSource();
+                source.buffer = decoded;
+                source.connect(rubberBandNode);
+                source.start();
+            } catch (error) {
+                alert('Erreur lors du chargement du fichier audio: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
