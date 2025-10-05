@@ -2,68 +2,84 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Lecteur Audio 8 Canaux</title>
+    <title>Lecteur Audio 8 Canaux avec RubberBand</title>
     <style>
-        body { font-family: Arial, sans-serif; }
-        div { margin: 10px; }
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .controls { margin: 10px 0; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="range"] { width: 200px; }
+        button { padding: 10px 20px; margin: 10px 0; }
+        small { color: #666; }
     </style>
 </head>
 <body>
-    <h1>Lecteur de Fichier Audio 8 Canaux</h1>
+    <h1>Lecteur de Fichier Audio 8 Canaux (.ogg/FLAC)</h1>
     
-    <select id="songSelect">
-        <option value="https://dn721900.ca.archive.org/0/items/test8canauxflac/test8canauxflac.ogg">JE 1</option>
-        <option value="https://example.com/audio2.wav">Morceau 2</option>
-        <option value="https://example.com/audio3.wav">Morceau 3</option>
-        <!-- Ajoutez d'autres liens ici -->
-    </select>
-    
-    <button id="playBtn">Jouer</button>
-    
-    <div>
-        <label>Vitesse de lecture (0.5 à 2.0)</label>
+    <button id="playBtn">Jouer / Arrêter</button>
+    <div class="controls">
+        <label>Vitesse de lecture (0.5 à 2.0x, sans altération de hauteur)</label>
         <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1">
+        <span id="speedValue">1.0x</span>
+        <small>(via RubberBand)</small>
     </div>
     
-    <div>
+    <div class="controls">
         <label>Volume pistes 1 et 2</label>
         <input type="range" id="vol1" min="0" max="1" step="0.01" value="1">
+        <span id="vol1Value">100%</span>
     </div>
-    <div>
+    <div class="controls">
         <label>Volume pistes 3 et 4</label>
         <input type="range" id="vol2" min="0" max="1" step="0.01" value="1">
+        <span id="vol2Value">100%</span>
     </div>
-    <div>
+    <div class="controls">
         <label>Volume pistes 5 et 6</label>
         <input type="range" id="vol3" min="0" max="1" step="0.01" value="1">
+        <span id="vol3Value">100%</span>
     </div>
-    <div>
+    <div class="controls">
         <label>Volume pistes 7 et 8</label>
         <input type="range" id="vol4" min="0" max="1" step="0.01" value="1">
+        <span id="vol4Value">100%</span>
     </div>
 
     <script type="module">
-        import { createRubberBandRealtimeNode } from 'https://cdn.jsdelivr.net/npm/rubberband-web/dist/index.js';
+        // Miroir jsDelivr (recommandé) - Alternative GitHub Raw en commentaire
+        import { createRubberBandRealtimeNode } from 'https://cdn.jsdelivr.net/npm/rubberband-web@0.2.1/dist/index.js';
+        // import { createRubberBandRealtimeNode } from 'https://raw.githubusercontent.com/delude88/rubberband-web/main/dist/index.js';
 
-        const audioCtx = new AudioContext();
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         let source;
         let rubberBandNode;
         let splitter;
         let gains = [];
         let merger;
+        let isPlaying = false;
+
+        // URL directe (ex. ton test FLAC ; remplace par ton .ogg)
+        const audioUrl = 'https://dn721900.ca.archive.org/0/items/test8canauxflac/test8canauxflac.ogg';
 
         async function initAudioGraph() {
-            const processorUrl = 'https://cdn.jsdelivr.net/npm/rubberband-web/public/rubberband-processor.js';
+            if (audioCtx.state === 'suspended') {
+                await audioCtx.resume();
+            }
+
+            // Miroir jsDelivr pour le processor
+            const processorUrl = 'https://cdn.jsdelivr.net/npm/rubberband-web@0.2.1/public/rubberband-processor.js';
+            // const processorUrl = 'https://raw.githubusercontent.com/delude88/rubberband-web/main/public/rubberband-processor.js';
+            
             rubberBandNode = await createRubberBandRealtimeNode(audioCtx, processorUrl);
             rubberBandNode.setPitch(1.0);
-            rubberBandNode.setTempo(1.0); // Vitesse initiale 1.0
+            rubberBandNode.setTempo(1.0);
 
             splitter = audioCtx.createChannelSplitter(8);
             merger = audioCtx.createChannelMerger(8);
 
             for (let i = 0; i < 8; i++) {
                 gains[i] = audioCtx.createGain();
-                splitter.connect(gains[i], i);
+                gains[i].gain.value = 1;
+                splitter.connect(gains[i], i, 0);
                 gains[i].connect(merger, 0, i);
             }
 
@@ -71,61 +87,80 @@
             merger.connect(audioCtx.destination);
         }
 
-        await initAudioGraph();
-
-        const volSliders = [
-            document.getElementById('vol1'),
-            document.getElementById('vol2'),
-            document.getElementById('vol3'),
-            document.getElementById('vol4')
-        ];
-
-        volSliders.forEach((slider, idx) => {
-            slider.addEventListener('input', () => {
-                const val = parseFloat(slider.value);
-                gains[2 * idx].gain.value = val;
-                gains[2 * idx + 1].gain.value = val;
-            });
-        });
-
-        const speedSlider = document.getElementById('speed');
-        speedSlider.addEventListener('input', () => {
-            const speed = parseFloat(speedSlider.value);
-            rubberBandNode.setTempo(1 / speed);
-        });
-
-        const playBtn = document.getElementById('playBtn');
-        playBtn.addEventListener('click', async () => {
-            if (audioCtx.state === 'suspended') {
-                await audioCtx.resume();
-            }
-
-            const select = document.getElementById('songSelect');
-            const url = select.value;
-
-            if (source) {
-                source.stop();
-                source.disconnect();
-            }
-
+        async function loadAudio() {
             try {
-                const resp = await fetch(url);
-                const buf = await resp.arrayBuffer();
-                const decoded = await audioCtx.decodeAudioData(buf);
+                const response = await fetch(audioUrl);
+                if (!response.ok) throw new Error('Impossible de charger le fichier');
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
 
-                if (decoded.numberOfChannels !== 8) {
-                    alert('Le fichier audio doit avoir exactement 8 canaux.');
-                    return;
+                if (audioBuffer.numberOfChannels !== 8) {
+                    alert('Erreur : Le fichier doit avoir exactement 8 canaux.');
+                    return null;
                 }
 
-                source = audioCtx.createBufferSource();
-                source.buffer = decoded;
-                source.connect(rubberBandNode);
-                source.start();
+                return audioBuffer;
             } catch (error) {
-                alert('Erreur lors du chargement du fichier audio: ' + error.message);
+                alert('Erreur lors du chargement : ' + error.message + '\nVérifiez l\'URL.');
+                return null;
             }
+        }
+
+        async function togglePlay() {
+            if (!isPlaying) {
+                await initAudioGraph();
+                const audioBuffer = await loadAudio();
+                if (!audioBuffer) return;
+
+                source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(rubberBandNode);
+                source.start(0);
+                isPlaying = true;
+                document.getElementById('playBtn').textContent = 'Arrêter';
+            } else {
+                if (source) {
+                    source.stop();
+                    source.disconnect();
+                }
+                isPlaying = false;
+                document.getElementById('playBtn').textContent = 'Jouer';
+            }
+        }
+
+        function updateVolumes() {
+            const vols = [document.getElementById('vol1'), document.getElementById('vol2'), document.getElementById('vol3'), document.getElementById('vol4')];
+            const valueSpans = ['vol1Value', 'vol2Value', 'vol3Value', 'vol4Value'];
+
+            vols.forEach((slider, idx) => {
+                slider.addEventListener('input', () => {
+                    const val = parseFloat(slider.value);
+                    gains[2 * idx].gain.value = val;
+                    gains[2 * idx + 1].gain.value = val;
+                    document.getElementById(valueSpans[idx]).textContent = Math.round(val * 100) + '%';
+                });
+            });
+        }
+
+        const speedSlider = document.getElementById('speed');
+        const speedValue = document.getElementById('speedValue');
+        speedSlider.addEventListener('input', () => {
+            const speed = parseFloat(speedSlider.value);
+            if (rubberBandNode) {
+                rubberBandNode.setTempo(1 / speed); // Time-stretching sans pitch shift
+            }
+            speedValue.textContent = speed + 'x';
         });
+
+        updateVolumes();
+        document.getElementById('playBtn').addEventListener('click', togglePlay);
+
+        // Auto-resume AudioContext au clic
+        document.addEventListener('click', () => {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }, { once: true });
     </script>
 </body>
 </html>
